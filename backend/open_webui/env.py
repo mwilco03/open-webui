@@ -996,3 +996,10 @@ EXTERNAL_PWA_MANIFEST_URL = os.environ.get("EXTERNAL_PWA_MANIFEST_URL")
 GITLAB_URL = os.environ.get("GITLAB_URL", "https://code.levelup.cce.af.mil")
 GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "")
 GITLAB_VERIFY_SSL = os.environ.get("GITLAB_VERIFY_SSL", "True").lower() == "true"
+
+####################################
+# MATTERMOST INTEGRATION
+####################################
+
+MATTERMOST_URL = os.environ.get("MATTERMOST_URL", "")
+MATTERMOST_TOKEN = os.environ.get("MATTERMOST_TOKEN", "")

@@ -615,6 +615,11 @@ async def lifespan(app: FastAPI):
     log.info("Installing external dependencies of functions and tools...")
     install_tool_and_function_dependencies()
 
+    # Install default skills (GitLab, Mattermost, etc.)
+    log.info("Installing default skills...")
+    from open_webui.default_skills import install_default_skills
+    await install_default_skills(app.state)
+
     app.state.redis = get_redis_connection(
         redis_url=REDIS_URL,
         redis_sentinels=get_sentinels_from_env(

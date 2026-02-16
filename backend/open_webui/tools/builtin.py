@@ -1958,31 +1958,81 @@ async def view_skill(
 
 
 # =============================================================================
-# GITLAB INTEGRATION
+# GITLAB BUILTIN FUNCTIONS (for RAG/Knowledge Base)
 # =============================================================================
+# Note: Additional GitLab functionality (issues, MRs, CI/CD) is available
+# via the GitLab skill in default_skills/gitlab.py
 
 
-
-# =============================================================================
-# GITLAB INTEGRATION (Consolidated & Optimized)
-# =============================================================================
-
-async def gitlab_issues(
+async def get_gitlab_file_content(
     project_id: str,
-    action: str,  # search|get|create|update|comment
-    issue_id: Optional[int] = None,
-    state: str = "opened",  # opened|closed|all
-    search: str = "",
-    labels: str = "",
-    title: str = "",
-    description: str = "",
-    state_event: str = "",  # close|reopen
-    assignee_ids: str = "",
-    comment_body: str = "",
+    file_path: str,
+    ref: str = "main",
     __request__: Request = None,
     __user__: dict = None,
 ) -> str:
-    """Manage GitLab issues: search, get, create, update, comment."""
+    """
+    Fetch the content of a file from a GitLab repository.
+    Useful for retrieving documentation, code, or configuration files.
+
+    :param project_id: GitLab project ID or path (e.g., "group/project")
+    :param file_path: Path to the file in the repository
+    :param ref: Branch, tag, or commit SHA (default: "main")
+    :return: JSON with file content or error
+    """
+    try:
+        from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
+        import aiohttp
+        import base64
+        from urllib.parse import quote
+
+        if not GITLAB_TOKEN:
+            return json.dumps({"error": "GitLab token not configured. Set GITLAB_TOKEN environment variable."})
+
+        headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
+        encoded_project_id = quote(project_id, safe="")
+        encoded_file_path = quote(file_path, safe="")
+
+        url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/repository/files/{encoded_file_path}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, params={"ref": ref},
+                                 ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    file_content = base64.b64decode(data["content"]).decode("utf-8")
+
+                    return json.dumps({
+                        "file_path": data["file_path"],
+                        "ref": ref,
+                        "content": file_content,
+                        "size": len(file_content)
+                    }, ensure_ascii=False)
+                else:
+                    error_text = await response.text()
+                    return json.dumps({"error": f"GitLab API error ({response.status}): {error_text}"})
+
+    except Exception as e:
+        log.exception(f"get_gitlab_file_content error: {e}")
+        return json.dumps({"error": str(e)})
+
+
+async def search_gitlab_code(
+    project_id: str,
+    search_query: str,
+    ref: str = "main",
+    __request__: Request = None,
+    __user__: dict = None,
+) -> str:
+    """
+    Search for code across a GitLab repository.
+    Useful for finding specific code patterns, functions, or text.
+
+    :param project_id: GitLab project ID or path (e.g., "group/project")
+    :param search_query: Search query string
+    :param ref: Branch, tag, or commit SHA to search in (default: "main")
+    :return: JSON with search results or error
+    """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
         import aiohttp
@@ -1994,918 +2044,98 @@ async def gitlab_issues(
         headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
         encoded_project_id = quote(project_id, safe="")
 
-        async with aiohttp.ClientSession() as session:
-            if action == "search":
-                params = {"state": state}
-                if search:
-                    params["search"] = search
-                if labels:
-                    params["labels"] = labels
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/issues"
-                async with session.get(url, headers=headers, params=params, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        issues = await response.json()
-                        return json.dumps({"issues": [{
-                            "id": i["iid"], "title": i["title"], "state": i["state"],
-                            "author": i["author"]["username"], "created_at": i["created_at"],
-                            "labels": i.get("labels", []), "web_url": i["web_url"]
-                        } for i in issues]}, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status}): {await response.text()}"})
-
-            elif action == "get":
-                if not issue_id:
-                    return json.dumps({"error": "issue_id required for get action"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/issues/{issue_id}"
-                async with session.get(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        issue = await response.json()
-                        return json.dumps({
-                            "id": issue["iid"], "title": issue["title"], "description": issue.get("description", ""),
-                            "state": issue["state"], "author": issue["author"]["username"],
-                            "created_at": issue["created_at"], "labels": issue.get("labels", []),
-                            "web_url": issue["web_url"]
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status}): {await response.text()}"})
-
-            elif action == "create":
-                if not title:
-                    return json.dumps({"error": "title required for create action"})
-
-                data = {"title": title}
-                if description:
-                    data["description"] = description
-                if labels:
-                    data["labels"] = labels
-                if assignee_ids:
-                    data["assignee_ids"] = assignee_ids
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/issues"
-                async with session.post(url, headers=headers, json=data, ssl=GITLAB_VERIFY_SSL,
-                                      timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 201:
-                        issue = await response.json()
-                        return json.dumps({
-                            "status": "success",
-                            "issue": {"id": issue["iid"], "title": issue["title"],
-                                    "state": issue["state"], "web_url": issue["web_url"]}
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status}): {await response.text()}"})
-
-            elif action == "update":
-                if not issue_id:
-                    return json.dumps({"error": "issue_id required for update action"})
-
-                data = {}
-                if title:
-                    data["title"] = title
-                if description:
-                    data["description"] = description
-                if state_event:
-                    data["state_event"] = state_event
-                if labels:
-                    data["labels"] = labels
-
-                if not data:
-                    return json.dumps({"error": "No update parameters provided"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/issues/{issue_id}"
-                async with session.put(url, headers=headers, json=data, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        issue = await response.json()
-                        return json.dumps({
-                            "status": "success",
-                            "issue": {"id": issue["iid"], "title": issue["title"], "state": issue["state"],
-                                    "labels": issue.get("labels", []), "web_url": issue["web_url"]}
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status}): {await response.text()}"})
-
-            elif action == "comment":
-                if not issue_id or not comment_body:
-                    return json.dumps({"error": "issue_id and comment_body required for comment action"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/issues/{issue_id}/notes"
-                data = {"body": comment_body}
-                async with session.post(url, headers=headers, json=data, ssl=GITLAB_VERIFY_SSL,
-                                      timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 201:
-                        note = await response.json()
-                        return json.dumps({
-                            "status": "success", "comment_id": note["id"],
-                            "body": note["body"], "author": note["author"]["username"]
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status}): {await response.text()}"})
-
-            else:
-                return json.dumps({"error": f"Unknown action: {action}. Valid: search|get|create|update|comment"})
-
-    except Exception as e:
-        log.exception(f"gitlab_issues error: {e}")
-        return json.dumps({"error": str(e)})
-
-
-async def gitlab_merge_requests(
-    project_id: str,
-    action: str,  # search|get|changes|comment|approve|merge
-    mr_id: Optional[str] = None,
-    state: str = "opened",  # opened|closed|merged|all
-    search: str = "",
-    labels: str = "",
-    comment_body: str = "",
-    merge_commit_message: str = "",
-    should_remove_source_branch: bool = False,
-    # BATCHING: Get multiple data in one call
-    include_changes: bool = False,  # Include diff when action=get
-    include_pipeline: bool = False,  # Include pipeline status when action=get
-    # STREAMING: User-controlled limits
-    max_diff_size: Optional[int] = None,  # None = full diff (user request), else limit
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """
-    Manage GitLab merge requests with batching and streaming support.
-
-    Batching: Set include_changes=True or include_pipeline=True with action=get
-    Streaming: Large diffs auto-truncate unless user explicitly requests full content
-    """
-    try:
-        from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
-        import aiohttp
-        from urllib.parse import quote
-
-        if not GITLAB_TOKEN:
-            return json.dumps({"error": "GitLab token not configured."})
-
-        headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
-        encoded_project_id = quote(project_id, safe="")
+        url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/search"
+        params = {"scope": "blobs", "search": search_query, "ref": ref}
 
         async with aiohttp.ClientSession() as session:
-            if action == "search":
-                params = {"state": state}
-                if search:
-                    params["search"] = search
-                if labels:
-                    params["labels"] = labels
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/merge_requests"
-                async with session.get(url, headers=headers, params=params, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        mrs = await response.json()
-                        return json.dumps({"merge_requests": [{
-                            "id": m["iid"], "title": m["title"], "state": m["state"],
-                            "author": m["author"]["username"], "source_branch": m["source_branch"],
-                            "target_branch": m["target_branch"], "labels": m.get("labels", []),
-                            "web_url": m["web_url"]
-                        } for m in mrs]}, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "get":
-                if not mr_id:
-                    return json.dumps({"error": "mr_id required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/merge_requests/{mr_id}"
-                async with session.get(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        mr = await response.json()
-                        result = {
-                            "id": mr["iid"], "title": mr["title"], "description": mr.get("description", ""),
-                            "state": mr["state"], "author": mr["author"]["username"],
-                            "source_branch": mr["source_branch"], "target_branch": mr["target_branch"],
-                            "web_url": mr["web_url"], "created_at": mr["created_at"],
-                            "updated_at": mr["updated_at"], "labels": mr.get("labels", []),
-                            "merge_status": mr.get("merge_status", "unknown"),
-                            "has_conflicts": mr.get("has_conflicts", False)
-                        }
-
-                        # BATCHING: Include changes if requested
-                        if include_changes:
-                            changes_url = f"{url}/changes"
-                            async with session.get(changes_url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                                 timeout=aiohttp.ClientTimeout(total=30)) as changes_resp:
-                                if changes_resp.status == 200:
-                                    changes_data = await changes_resp.json()
-                                    changes = [{
-                                        "old_path": c["old_path"], "new_path": c["new_path"],
-                                        "diff": c["diff"], "new_file": c.get("new_file", False),
-                                        "renamed_file": c.get("renamed_file", False),
-                                        "deleted_file": c.get("deleted_file", False)
-                                    } for c in changes_data.get("changes", [])]
-
-                                    # STREAMING: Apply diff size limits
-                                    total_diff_size = sum(len(c["diff"]) for c in changes)
-                                    if max_diff_size is None and total_diff_size > MAX_DIFF_SIZE:
-                                        # AI proactive fetch - apply limit
-                                        result["changes"] = changes
-                                        result["diff_truncated"] = True
-                                        result["diff_message"] = f"Diff size {total_diff_size} bytes. Set max_diff_size=0 for full diff."
-                                    else:
-                                        result["changes"] = changes
-
-                        # BATCHING: Include pipeline if requested
-                        if include_pipeline:
-                            pipeline_url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/pipelines"
-                            async with session.get(pipeline_url, headers=headers,
-                                                 params={"ref": mr["source_branch"], "per_page": 1},
-                                                 ssl=GITLAB_VERIFY_SSL,
-                                                 timeout=aiohttp.ClientTimeout(total=30)) as pipe_resp:
-                                if pipe_resp.status == 200:
-                                    pipelines = await pipe_resp.json()
-                                    if pipelines:
-                                        p = pipelines[0]
-                                        result["pipeline"] = {
-                                            "id": p["id"], "status": p["status"], "ref": p["ref"],
-                                            "sha": p["sha"], "web_url": p["web_url"]
-                                        }
-
-                        return json.dumps(result, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "changes":
-                if not mr_id:
-                    return json.dumps({"error": "mr_id required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/merge_requests/{mr_id}/changes"
-                async with session.get(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        changes = [{
-                            "old_path": c["old_path"], "new_path": c["new_path"], "diff": c["diff"],
-                            "new_file": c.get("new_file", False), "renamed_file": c.get("renamed_file", False),
-                            "deleted_file": c.get("deleted_file", False)
-                        } for c in data.get("changes", [])]
-
-                        # STREAMING: Handle large diffs
-                        total_size = sum(len(c["diff"]) for c in changes)
-                        if max_diff_size is not None and total_size > max_diff_size:
-                            return json.dumps({
-                                "changes": changes,
-                                "truncated": True,
-                                "total_size": total_size,
-                                "message": f"Diff truncated. Set max_diff_size=None for full content."
-                            }, ensure_ascii=False)
-
-                        return json.dumps({"changes": changes}, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "comment":
-                if not mr_id or not comment_body:
-                    return json.dumps({"error": "mr_id and comment_body required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/merge_requests/{mr_id}/notes"
-                async with session.post(url, headers=headers, json={"body": comment_body},
-                                      ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 201:
-                        note = await response.json()
-                        return json.dumps({
-                            "status": "success", "comment_id": note["id"],
-                            "body": note["body"], "author": note["author"]["username"]
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "approve":
-                if not mr_id:
-                    return json.dumps({"error": "mr_id required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/merge_requests/{mr_id}/approve"
-                async with session.post(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                      timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 201:
-                        return json.dumps({"status": "success", "message": "MR approved"})
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "merge":
-                if not mr_id:
-                    return json.dumps({"error": "mr_id required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/merge_requests/{mr_id}/merge"
-                data = {"should_remove_source_branch": should_remove_source_branch}
-                if merge_commit_message:
-                    data["merge_commit_message"] = merge_commit_message
-
-                async with session.put(url, headers=headers, json=data, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        return json.dumps({
-                            "status": "success", "message": "MR merged",
-                            "state": result.get("state"), "merged_at": result.get("merged_at")
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            else:
-                return json.dumps({"error": f"Unknown action: {action}. Valid: search|get|changes|comment|approve|merge"})
-
-    except Exception as e:
-        log.exception(f"gitlab_merge_requests error: {e}")
-        return json.dumps({"error": str(e)})
-
-
-async def gitlab_repository(
-    project_id: str,
-    action: str,  # get_file|commit_file|search_code|list_branches|get_commit|create_branch|delete_branch
-    file_path: str = "",
-    ref: str = "main",
-    content: str = "",
-    commit_message: str = "",
-    branch: str = "",
-    branch_name: str = "",
-    search_query: str = "",
-    commit_sha: str = "",
-    # STREAMING: User-controlled limits
-    max_file_size: Optional[int] = None,  # None = full file (user wants it all)
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """Manage GitLab repository: files, code search, branches, commits."""
-    try:
-        from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
-        import aiohttp
-        import base64
-        from urllib.parse import quote
-
-        if not GITLAB_TOKEN:
-            return json.dumps({"error": "GitLab token not configured."})
-
-        headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
-        encoded_project_id = quote(project_id, safe="")
-
-        async with aiohttp.ClientSession() as session:
-            if action == "get_file":
-                if not file_path:
-                    return json.dumps({"error": "file_path required"})
-
-                encoded_file_path = quote(file_path, safe="")
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/repository/files/{encoded_file_path}"
-
-                async with session.get(url, headers=headers, params={"ref": ref},
-                                     ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        file_content = base64.b64decode(data["content"]).decode("utf-8")
-                        file_size = len(file_content)
-
-                        # STREAMING: Apply size limits unless user wants full content
-                        if max_file_size is None:
-                            # User explicitly wants full file - return everything
-                            return json.dumps({
-                                "file_path": data["file_path"], "ref": ref,
-                                "content": file_content, "size": file_size
-                            }, ensure_ascii=False)
-                        elif file_size > max_file_size:
-                            # Truncate for AI proactive fetch
-                            return json.dumps({
-                                "file_path": data["file_path"], "ref": ref,
-                                "content": file_content[:max_file_size],
-                                "size": file_size, "truncated": True,
-                                "message": f"Showing first {max_file_size} of {file_size} bytes. Set max_file_size=None for full file."
-                            }, ensure_ascii=False)
-                        else:
-                            return json.dumps({
-                                "file_path": data["file_path"], "ref": ref,
-                                "content": file_content, "size": file_size
-                            }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "commit_file":
-                if not file_path or not content or not commit_message or not branch:
-                    return json.dumps({"error": "file_path, content, commit_message, branch required"})
-
-                encoded_file_path = quote(file_path, safe="")
-                check_url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/repository/files/{encoded_file_path}"
-
-                # Check if file exists
-                async with session.get(check_url, headers=headers, params={"ref": branch},
-                                     ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=10)) as check_resp:
-                    file_exists = check_resp.status == 200
-
-                data = {"branch": branch, "content": content, "commit_message": commit_message}
-
-                if file_exists:
-                    async with session.put(check_url, headers=headers, json=data,
-                                         ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                        if response.status == 200:
-                            result = await response.json()
-                            return json.dumps({
-                                "status": "success", "action": "updated",
-                                "file_path": result["file_path"], "branch": result["branch"]
-                            }, ensure_ascii=False)
-                        else:
-                            return json.dumps({"error": f"GitLab API error ({response.status})"})
+            async with session.get(url, headers=headers, params=params,
+                                 ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    results = await response.json()
+                    return json.dumps({
+                        "results": [{
+                            "filename": r.get("filename", ""),
+                            "path": r.get("path", ""),
+                            "data": r.get("data", ""),
+                            "ref": ref
+                        } for r in results[:20]]
+                    }, ensure_ascii=False)
                 else:
-                    async with session.post(check_url, headers=headers, json=data,
-                                          ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                        if response.status == 201:
-                            result = await response.json()
-                            return json.dumps({
-                                "status": "success", "action": "created",
-                                "file_path": result["file_path"], "branch": result["branch"]
-                            }, ensure_ascii=False)
-                        else:
-                            return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "search_code":
-                if not search_query:
-                    return json.dumps({"error": "search_query required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/search"
-                params = {"scope": "blobs", "search": search_query, "ref": ref}
-
-                async with session.get(url, headers=headers, params=params,
-                                     ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        results = await response.json()
-                        return json.dumps({"results": [{
-                            "filename": r.get("filename", ""), "path": r.get("path", ""),
-                            "data": r.get("data", ""), "ref": ref
-                        } for r in results[:20]]}, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "list_branches":
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/repository/branches"
-                params = {}
-                if search_query:
-                    params["search"] = search_query
-
-                async with session.get(url, headers=headers, params=params,
-                                     ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        branches = await response.json()
-                        return json.dumps({"branches": [{
-                            "name": b["name"], "protected": b.get("protected", False),
-                            "default": b.get("default", False),
-                            "last_commit": {
-                                "id": b["commit"]["id"], "message": b["commit"]["message"],
-                                "committed_date": b["commit"]["committed_date"]
-                            }
-                        } for b in branches]}, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "get_commit":
-                if not commit_sha:
-                    return json.dumps({"error": "commit_sha required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/repository/commits/{commit_sha}"
-
-                async with session.get(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        commit = await response.json()
-                        return json.dumps({
-                            "id": commit["id"], "short_id": commit["short_id"],
-                            "title": commit["title"], "message": commit["message"],
-                            "author_name": commit["author_name"], "authored_date": commit["authored_date"],
-                            "committer_name": commit["committer_name"], "committed_date": commit["committed_date"],
-                            "web_url": commit["web_url"], "stats": commit.get("stats", {})
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "create_branch":
-                if not branch_name or not ref:
-                    return json.dumps({"error": "branch_name and ref required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/repository/branches"
-                data = {"branch": branch_name, "ref": ref}
-
-                async with session.post(url, headers=headers, json=data, ssl=GITLAB_VERIFY_SSL,
-                                      timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 201:
-                        branch = await response.json()
-                        return json.dumps({
-                            "status": "success", "branch_name": branch["name"],
-                            "commit_id": branch["commit"]["id"]
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "delete_branch":
-                if not branch_name:
-                    return json.dumps({"error": "branch_name required"})
-
-                encoded_branch = quote(branch_name, safe="")
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/repository/branches/{encoded_branch}"
-
-                async with session.delete(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                        timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 204:
-                        return json.dumps({"status": "success", "message": f"Branch '{branch_name}' deleted"})
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            else:
-                return json.dumps({"error": f"Unknown action: {action}"})
+                    error_text = await response.text()
+                    return json.dumps({"error": f"GitLab API error ({response.status}): {error_text}"})
 
     except Exception as e:
-        log.exception(f"gitlab_repository error: {e}")
+        log.exception(f"search_gitlab_code error: {e}")
         return json.dumps({"error": str(e)})
 
 
-async def gitlab_cicd(
+async def search_gitlab_commits(
     project_id: str,
-    action: str,  # get_pipeline|trigger_pipeline|list_jobs|get_job_logs|list_releases|get_release
     ref: str = "main",
-    pipeline_id: Optional[str] = None,
-    job_id: Optional[str] = None,
-    tag_name: str = "",
-    variables: str = "",  # JSON string for trigger_pipeline
+    since: str = "",
+    until: str = "",
+    search: str = "",
+    per_page: int = 20,
     __request__: Request = None,
     __user__: dict = None,
 ) -> str:
-    """Manage GitLab CI/CD: pipelines, jobs, releases."""
+    """
+    Search and list commits in a GitLab repository.
+    Useful for finding commit history, changes, or specific commits.
+
+    :param project_id: GitLab project ID or path (e.g., "group/project")
+    :param ref: Branch or tag name (default: "main")
+    :param since: Only commits after this date (ISO 8601 format)
+    :param until: Only commits before this date (ISO 8601 format)
+    :param search: Search commits by message
+    :param per_page: Number of results (default 20, max 100)
+    :return: JSON with commits or error
+    """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
         import aiohttp
         from urllib.parse import quote
 
         if not GITLAB_TOKEN:
-            return json.dumps({"error": "GitLab token not configured."})
+            return json.dumps({"error": "GitLab token not configured. Set GITLAB_TOKEN environment variable."})
 
         headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
         encoded_project_id = quote(project_id, safe="")
 
-        async with aiohttp.ClientSession() as session:
-            if action == "get_pipeline":
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/pipelines"
-                params = {"ref": ref, "per_page": 1}
+        url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/repository/commits"
+        params = {"ref_name": ref, "per_page": min(per_page, 100)}
 
-                async with session.get(url, headers=headers, params=params,
-                                     ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        pipelines = await response.json()
-                        if not pipelines:
-                            return json.dumps({"message": f"No pipelines found for ref '{ref}'"})
-
-                        p = pipelines[0]
-                        return json.dumps({
-                            "id": p["id"], "status": p["status"], "ref": p["ref"],
-                            "sha": p["sha"], "web_url": p["web_url"],
-                            "created_at": p["created_at"], "updated_at": p["updated_at"]
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "trigger_pipeline":
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/pipeline"
-                data = {"ref": ref}
-
-                if variables:
-                    try:
-                        vars_dict = json.loads(variables)
-                        data["variables"] = [{"key": k, "value": v} for k, v in vars_dict.items()]
-                    except json.JSONDecodeError:
-                        return json.dumps({"error": "Invalid JSON format for variables"})
-
-                async with session.post(url, headers=headers, json=data, ssl=GITLAB_VERIFY_SSL,
-                                      timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 201:
-                        pipeline = await response.json()
-                        return json.dumps({
-                            "status": "success", "pipeline_id": pipeline["id"],
-                            "pipeline_status": pipeline["status"], "ref": pipeline["ref"],
-                            "web_url": pipeline["web_url"]
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "list_jobs":
-                if not pipeline_id:
-                    return json.dumps({"error": "pipeline_id required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/pipelines/{pipeline_id}/jobs"
-
-                async with session.get(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        jobs = await response.json()
-                        return json.dumps({"jobs": [{
-                            "id": j["id"], "name": j["name"], "stage": j["stage"],
-                            "status": j["status"], "ref": j["ref"], "web_url": j["web_url"]
-                        } for j in jobs]}, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "get_job_logs":
-                if not job_id:
-                    return json.dumps({"error": "job_id required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/jobs/{job_id}/trace"
-
-                async with session.get(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        logs = await response.text()
-                        # STREAMING: Truncate very large logs
-                        if len(logs) > 10000:
-                            return json.dumps({
-                                "job_id": job_id,
-                                "logs": logs[:10000],
-                                "truncated": True,
-                                "message": "Logs truncated to 10000 characters"
-                            }, ensure_ascii=False)
-                        return json.dumps({"job_id": job_id, "logs": logs}, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "list_releases":
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/releases"
-
-                async with session.get(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        releases = await response.json()
-                        return json.dumps({"releases": [{
-                            "tag_name": r["tag_name"], "name": r.get("name", ""),
-                            "description": r.get("description", ""),
-                            "created_at": r["created_at"], "released_at": r.get("released_at")
-                        } for r in releases]}, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "get_release":
-                if not tag_name:
-                    return json.dumps({"error": "tag_name required"})
-
-                encoded_tag = quote(tag_name, safe="")
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/releases/{encoded_tag}"
-
-                async with session.get(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        release = await response.json()
-                        return json.dumps({
-                            "tag_name": release["tag_name"], "name": release.get("name", ""),
-                            "description": release.get("description", ""),
-                            "created_at": release["created_at"],
-                            "released_at": release.get("released_at"),
-                            "assets": release.get("assets", {})
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            else:
-                return json.dumps({"error": f"Unknown action: {action}"})
-
-    except Exception as e:
-        log.exception(f"gitlab_cicd error: {e}")
-        return json.dumps({"error": str(e)})
-
-
-async def gitlab_project(
-    action: str,  # get_info|search_repos
-    project_id: str = "",
-    search_query: str = "",
-    __request__: Request = None,
-    __user__: dict = None,
-) -> str:
-    """Manage GitLab projects: get info, search repos."""
-    try:
-        from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
-        import aiohttp
-        from urllib.parse import quote
-
-        if not GITLAB_TOKEN:
-            return json.dumps({"error": "GitLab token not configured."})
-
-        headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
+        if since:
+            params["since"] = since
+        if until:
+            params["until"] = until
+        if search:
+            params["search"] = search
 
         async with aiohttp.ClientSession() as session:
-            if action == "get_info":
-                if not project_id:
-                    return json.dumps({"error": "project_id required"})
-
-                encoded_project_id = quote(project_id, safe="")
-                url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}"
-
-                async with session.get(url, headers=headers, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        project = await response.json()
-                        return json.dumps({
-                            "id": project["id"], "name": project["name"],
-                            "path": project["path_with_namespace"],
-                            "description": project.get("description", ""),
-                            "web_url": project["web_url"],
-                            "default_branch": project.get("default_branch", ""),
-                            "star_count": project.get("star_count", 0),
-                            "forks_count": project.get("forks_count", 0)
-                        }, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            elif action == "search_repos":
-                if not search_query:
-                    return json.dumps({"error": "search_query required"})
-
-                url = f"{GITLAB_URL}/api/v4/projects"
-                params = {"search": search_query, "per_page": 20}
-
-                async with session.get(url, headers=headers, params=params, ssl=GITLAB_VERIFY_SSL,
-                                     timeout=aiohttp.ClientTimeout(total=30)) as response:
-                    if response.status == 200:
-                        projects = await response.json()
-                        return json.dumps({"repositories": [{
-                            "id": p["id"], "name": p["name"],
-                            "path": p["path_with_namespace"],
-                            "description": p.get("description", ""),
-                            "web_url": p["web_url"],
-                            "default_branch": p.get("default_branch", "")
-                        } for p in projects]}, ensure_ascii=False)
-                    else:
-                        return json.dumps({"error": f"GitLab API error ({response.status})"})
-
-            else:
-                return json.dumps({"error": f"Unknown action: {action}"})
+            async with session.get(url, headers=headers, params=params,
+                                 ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status == 200:
+                    commits = await response.json()
+                    return json.dumps({
+                        "commits": [{
+                            "id": c["id"],
+                            "short_id": c["short_id"],
+                            "title": c["title"],
+                            "message": c["message"],
+                            "author_name": c["author_name"],
+                            "author_email": c["author_email"],
+                            "authored_date": c["authored_date"],
+                            "committed_date": c["committed_date"],
+                            "web_url": c.get("web_url", "")
+                        } for c in commits]
+                    }, ensure_ascii=False)
+                else:
+                    error_text = await response.text()
+                    return json.dumps({"error": f"GitLab API error ({response.status}): {error_text}"})
 
     except Exception as e:
-        log.exception(f"gitlab_project error: {e}")
+        log.exception(f"search_gitlab_commits error: {e}")
         return json.dumps({"error": str(e)})
 
-
-# =============================================================================
-# BACKWARD COMPATIBILITY ALIASES
-# Legacy function names that call the new consolidated functions
-# =============================================================================
-
-# Issues
-async def search_gitlab_issues(project_id: str, state: str = "opened", search: str = "", labels: str = "",
-                                __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_issues(action='search') instead."""
-    return await gitlab_issues(project_id, "search", state=state, search=search, labels=labels,
-                               __request__=__request__, __user__=__user__)
-
-async def create_gitlab_issue(project_id: str, title: str, description: str = "", labels: str = "",
-                               assignee_ids: str = "", __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_issues(action='create') instead."""
-    return await gitlab_issues(project_id, "create", title=title, description=description,
-                               labels=labels, assignee_ids=assignee_ids,
-                               __request__=__request__, __user__=__user__)
-
-async def update_gitlab_issue(project_id: str, issue_id: str, title: str = "", description: str = "",
-                               state_event: str = "", labels: str = "",
-                               __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_issues(action='update') instead."""
-    return await gitlab_issues(project_id, "update", issue_id=int(issue_id), title=title,
-                               description=description, state_event=state_event, labels=labels,
-                               __request__=__request__, __user__=__user__)
-
-async def comment_on_gitlab_issue(project_id: str, issue_id: str, comment: str,
-                                   __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_issues(action='comment') instead."""
-    return await gitlab_issues(project_id, "comment", issue_id=int(issue_id), comment_body=comment,
-                               __request__=__request__, __user__=__user__)
-
-# Merge Requests
-async def search_gitlab_merge_requests(project_id: str, state: str = "opened", search: str = "",
-                                        labels: str = "", __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_merge_requests(action='search') instead."""
-    return await gitlab_merge_requests(project_id, "search", state=state, search=search, labels=labels,
-                                        __request__=__request__, __user__=__user__)
-
-async def get_gitlab_mr_details(project_id: str, mr_id: str,
-                                 __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_merge_requests(action='get') instead."""
-    return await gitlab_merge_requests(project_id, "get", mr_id=mr_id,
-                                        __request__=__request__, __user__=__user__)
-
-async def get_gitlab_mr_changes(project_id: str, mr_id: str,
-                                 __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_merge_requests(action='changes') instead."""
-    return await gitlab_merge_requests(project_id, "changes", mr_id=mr_id,
-                                        __request__=__request__, __user__=__user__)
-
-async def comment_on_gitlab_mr(project_id: str, mr_id: str, comment: str,
-                                __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_merge_requests(action='comment') instead."""
-    return await gitlab_merge_requests(project_id, "comment", mr_id=mr_id, comment_body=comment,
-                                        __request__=__request__, __user__=__user__)
-
-async def approve_gitlab_mr(project_id: str, mr_id: str,
-                             __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_merge_requests(action='approve') instead."""
-    return await gitlab_merge_requests(project_id, "approve", mr_id=mr_id,
-                                        __request__=__request__, __user__=__user__)
-
-async def merge_gitlab_mr(project_id: str, mr_id: str, merge_commit_message: str = "",
-                          should_remove_source_branch: bool = False,
-                          __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_merge_requests(action='merge') instead."""
-    return await gitlab_merge_requests(project_id, "merge", mr_id=mr_id,
-                                        merge_commit_message=merge_commit_message,
-                                        should_remove_source_branch=should_remove_source_branch,
-                                        __request__=__request__, __user__=__user__)
-
-# Repository
-async def get_gitlab_file_content(project_id: str, file_path: str, ref: str = "main",
-                                   __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_repository(action='get_file') instead."""
-    return await gitlab_repository(project_id, "get_file", file_path=file_path, ref=ref,
-                                    __request__=__request__, __user__=__user__)
-
-async def commit_gitlab_file(project_id: str, file_path: str, content: str, commit_message: str, branch: str,
-                              __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_repository(action='commit_file') instead."""
-    return await gitlab_repository(project_id, "commit_file", file_path=file_path, content=content,
-                                    commit_message=commit_message, branch=branch,
-                                    __request__=__request__, __user__=__user__)
-
-async def search_gitlab_code(project_id: str, search_query: str, ref: str = "main",
-                              __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_repository(action='search_code') instead."""
-    return await gitlab_repository(project_id, "search_code", search_query=search_query, ref=ref,
-                                    __request__=__request__, __user__=__user__)
-
-async def list_gitlab_branches(project_id: str, search: str = "",
-                                __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_repository(action='list_branches') instead."""
-    return await gitlab_repository(project_id, "list_branches", search_query=search,
-                                    __request__=__request__, __user__=__user__)
-
-async def get_gitlab_commit_details(project_id: str, commit_sha: str,
-                                     __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_repository(action='get_commit') instead."""
-    return await gitlab_repository(project_id, "get_commit", commit_sha=commit_sha,
-                                    __request__=__request__, __user__=__user__)
-
-async def create_gitlab_branch(project_id: str, branch_name: str, ref: str,
-                                __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_repository(action='create_branch') instead."""
-    return await gitlab_repository(project_id, "create_branch", branch_name=branch_name, ref=ref,
-                                    __request__=__request__, __user__=__user__)
-
-async def delete_gitlab_branch(project_id: str, branch_name: str,
-                                __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_repository(action='delete_branch') instead."""
-    return await gitlab_repository(project_id, "delete_branch", branch_name=branch_name,
-                                    __request__=__request__, __user__=__user__)
-
-# CI/CD
-async def get_gitlab_pipeline_status(project_id: str, ref: str = "main",
-                                      __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_cicd(action='get_pipeline') instead."""
-    return await gitlab_cicd(project_id, "get_pipeline", ref=ref,
-                              __request__=__request__, __user__=__user__)
-
-async def trigger_gitlab_pipeline(project_id: str, ref: str, variables: str = "",
-                                   __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_cicd(action='trigger_pipeline') instead."""
-    return await gitlab_cicd(project_id, "trigger_pipeline", ref=ref, variables=variables,
-                              __request__=__request__, __user__=__user__)
-
-async def list_gitlab_pipeline_jobs(project_id: str, pipeline_id: str,
-                                     __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_cicd(action='list_jobs') instead."""
-    return await gitlab_cicd(project_id, "list_jobs", pipeline_id=pipeline_id,
-                              __request__=__request__, __user__=__user__)
-
-async def get_gitlab_job_logs(project_id: str, job_id: str,
-                               __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_cicd(action='get_job_logs') instead."""
-    return await gitlab_cicd(project_id, "get_job_logs", job_id=job_id,
-                              __request__=__request__, __user__=__user__)
-
-async def list_gitlab_releases(project_id: str,
-                                __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_cicd(action='list_releases') instead."""
-    return await gitlab_cicd(project_id, "list_releases",
-                              __request__=__request__, __user__=__user__)
-
-async def get_gitlab_release(project_id: str, tag_name: str,
-                              __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_cicd(action='get_release') instead."""
-    return await gitlab_cicd(project_id, "get_release", tag_name=tag_name,
-                              __request__=__request__, __user__=__user__)
-
-# Project
-async def get_gitlab_project_info(project_id: str,
-                                   __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_project(action='get_info') instead."""
-    return await gitlab_project("get_info", project_id=project_id,
-                                 __request__=__request__, __user__=__user__)
-
-async def search_gitlab_repos(search_query: str,
-                               __request__: Request = None, __user__: dict = None) -> str:
-    """Legacy: Use gitlab_project(action='search_repos') instead."""
-    return await gitlab_project("search_repos", search_query=search_query,
-                                 __request__=__request__, __user__=__user__)
 

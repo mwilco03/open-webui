@@ -77,18 +77,21 @@ async def install_default_skills(app_state):
     """
     try:
         from open_webui.models.tools import Tools
-        from open_webui.env import GITLAB_TOKEN
+        from open_webui.env import GITLAB_TOKEN, MATTERMOST_TOKEN
 
         default_skills = get_default_skills()
         log.info(f"Found {len(default_skills)} default skills to install")
 
         for skill_name, skill_path in default_skills:
             try:
-                # Check if we should install this skill
-                # GitLab skill requires GITLAB_TOKEN to be configured
+                # Check if we should install this skill based on environment configuration
                 if skill_name == "gitlab":
                     if not GITLAB_TOKEN:
                         log.info(f"Skipping GitLab skill installation (GITLAB_TOKEN not configured)")
+                        continue
+                elif skill_name == "mattermost":
+                    if not MATTERMOST_TOKEN:
+                        log.info(f"Skipping Mattermost skill installation (MATTERMOST_TOKEN not configured)")
                         continue
 
                 # Read skill content
