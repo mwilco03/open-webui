@@ -1955,3 +1955,316 @@ async def view_skill(
     except Exception as e:
         log.exception(f"view_skill error: {e}")
         return json.dumps({"error": str(e)})
+
+
+# =============================================================================
+# GITLAB INTEGRATION
+# =============================================================================
+
+
+async def search_gitlab_issues(
+    project_id: str,
+    state: str = "opened",
+    search: str = "",
+    labels: str = "",
+    __request__: Request = None,
+    __user__: dict = None,
+) -> str:
+    """
+    Search for issues in a GitLab project.
+
+    :param project_id: The GitLab project ID or path (e.g., "12345" or "group/project")
+    :param state: Issue state - "opened", "closed", or "all" (default: "opened")
+    :param search: Search term to filter issues by title/description
+    :param labels: Comma-separated list of labels to filter by
+    :return: JSON list of issues with id, title, state, author, created_at, web_url
+    """
+    try:
+        from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
+        import aiohttp
+
+        if not GITLAB_TOKEN:
+            return json.dumps({"error": "GitLab token not configured. Set GITLAB_TOKEN environment variable."})
+
+        headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
+        params = {"state": state}
+        if search:
+            params["search"] = search
+        if labels:
+            params["labels"] = labels
+
+        # URL encode the project_id to handle paths with slashes
+        from urllib.parse import quote
+        encoded_project_id = quote(project_id, safe="")
+
+        url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/issues"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers=headers, params=params, ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    issues = await response.json()
+                    # Simplify the response to only include relevant fields
+                    simplified_issues = [
+                        {
+                            "id": issue["iid"],
+                            "title": issue["title"],
+                            "state": issue["state"],
+                            "author": issue["author"]["username"],
+                            "created_at": issue["created_at"],
+                            "labels": issue.get("labels", []),
+                            "web_url": issue["web_url"],
+                        }
+                        for issue in issues
+                    ]
+                    return json.dumps({"issues": simplified_issues}, ensure_ascii=False)
+                else:
+                    error_text = await response.text()
+                    return json.dumps({"error": f"GitLab API error ({response.status}): {error_text}"})
+
+    except Exception as e:
+        log.exception(f"search_gitlab_issues error: {e}")
+        return json.dumps({"error": str(e)})
+
+
+async def search_gitlab_merge_requests(
+    project_id: str,
+    state: str = "opened",
+    search: str = "",
+    labels: str = "",
+    __request__: Request = None,
+    __user__: dict = None,
+) -> str:
+    """
+    Search for merge requests in a GitLab project.
+
+    :param project_id: The GitLab project ID or path (e.g., "12345" or "group/project")
+    :param state: MR state - "opened", "closed", "merged", or "all" (default: "opened")
+    :param search: Search term to filter MRs by title/description
+    :param labels: Comma-separated list of labels to filter by
+    :return: JSON list of merge requests with id, title, state, author, source_branch, target_branch, web_url
+    """
+    try:
+        from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
+        import aiohttp
+
+        if not GITLAB_TOKEN:
+            return json.dumps({"error": "GitLab token not configured. Set GITLAB_TOKEN environment variable."})
+
+        headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
+        params = {"state": state}
+        if search:
+            params["search"] = search
+        if labels:
+            params["labels"] = labels
+
+        from urllib.parse import quote
+        encoded_project_id = quote(project_id, safe="")
+
+        url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/merge_requests"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers=headers, params=params, ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    mrs = await response.json()
+                    simplified_mrs = [
+                        {
+                            "id": mr["iid"],
+                            "title": mr["title"],
+                            "state": mr["state"],
+                            "author": mr["author"]["username"],
+                            "source_branch": mr["source_branch"],
+                            "target_branch": mr["target_branch"],
+                            "labels": mr.get("labels", []),
+                            "web_url": mr["web_url"],
+                        }
+                        for mr in mrs
+                    ]
+                    return json.dumps({"merge_requests": simplified_mrs}, ensure_ascii=False)
+                else:
+                    error_text = await response.text()
+                    return json.dumps({"error": f"GitLab API error ({response.status}): {error_text}"})
+
+    except Exception as e:
+        log.exception(f"search_gitlab_merge_requests error: {e}")
+        return json.dumps({"error": str(e)})
+
+
+async def get_gitlab_project_info(
+    project_id: str,
+    __request__: Request = None,
+    __user__: dict = None,
+) -> str:
+    """
+    Get information about a GitLab project.
+
+    :param project_id: The GitLab project ID or path (e.g., "12345" or "group/project")
+    :return: JSON with project details including name, description, url, stars, forks, etc.
+    """
+    try:
+        from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
+        import aiohttp
+
+        if not GITLAB_TOKEN:
+            return json.dumps({"error": "GitLab token not configured. Set GITLAB_TOKEN environment variable."})
+
+        headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
+
+        from urllib.parse import quote
+        encoded_project_id = quote(project_id, safe="")
+
+        url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers=headers, ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    project = await response.json()
+                    simplified_project = {
+                        "id": project["id"],
+                        "name": project["name"],
+                        "path": project["path_with_namespace"],
+                        "description": project.get("description", ""),
+                        "web_url": project["web_url"],
+                        "default_branch": project.get("default_branch", ""),
+                        "star_count": project.get("star_count", 0),
+                        "forks_count": project.get("forks_count", 0),
+                    }
+                    return json.dumps(simplified_project, ensure_ascii=False)
+                else:
+                    error_text = await response.text()
+                    return json.dumps({"error": f"GitLab API error ({response.status}): {error_text}"})
+
+    except Exception as e:
+        log.exception(f"get_gitlab_project_info error: {e}")
+        return json.dumps({"error": str(e)})
+
+
+async def create_gitlab_issue(
+    project_id: str,
+    title: str,
+    description: str = "",
+    labels: str = "",
+    assignee_ids: str = "",
+    __request__: Request = None,
+    __user__: dict = None,
+) -> str:
+    """
+    Create a new issue in a GitLab project.
+
+    :param project_id: The GitLab project ID or path (e.g., "12345" or "group/project")
+    :param title: Issue title
+    :param description: Issue description in markdown format
+    :param labels: Comma-separated list of labels
+    :param assignee_ids: Comma-separated list of user IDs to assign
+    :return: JSON with created issue details including id, web_url
+    """
+    try:
+        from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
+        import aiohttp
+
+        if not GITLAB_TOKEN:
+            return json.dumps({"error": "GitLab token not configured. Set GITLAB_TOKEN environment variable."})
+
+        headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
+        data = {"title": title}
+
+        if description:
+            data["description"] = description
+        if labels:
+            data["labels"] = labels
+        if assignee_ids:
+            data["assignee_ids"] = assignee_ids
+
+        from urllib.parse import quote
+        encoded_project_id = quote(project_id, safe="")
+
+        url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/issues"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url, headers=headers, json=data, ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 201:
+                    issue = await response.json()
+                    return json.dumps(
+                        {
+                            "status": "success",
+                            "issue": {
+                                "id": issue["iid"],
+                                "title": issue["title"],
+                                "state": issue["state"],
+                                "web_url": issue["web_url"],
+                            },
+                        },
+                        ensure_ascii=False,
+                    )
+                else:
+                    error_text = await response.text()
+                    return json.dumps({"error": f"GitLab API error ({response.status}): {error_text}"})
+
+    except Exception as e:
+        log.exception(f"create_gitlab_issue error: {e}")
+        return json.dumps({"error": str(e)})
+
+
+async def get_gitlab_mr_details(
+    project_id: str,
+    mr_id: str,
+    __request__: Request = None,
+    __user__: dict = None,
+) -> str:
+    """
+    Get detailed information about a specific GitLab merge request including changes and discussions.
+
+    :param project_id: The GitLab project ID or path (e.g., "12345" or "group/project")
+    :param mr_id: The merge request IID (internal ID)
+    :return: JSON with detailed MR information including changes, approvals, and discussions
+    """
+    try:
+        from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
+        import aiohttp
+
+        if not GITLAB_TOKEN:
+            return json.dumps({"error": "GitLab token not configured. Set GITLAB_TOKEN environment variable."})
+
+        headers = {"PRIVATE-TOKEN": GITLAB_TOKEN}
+
+        from urllib.parse import quote
+        encoded_project_id = quote(project_id, safe="")
+
+        url = f"{GITLAB_URL}/api/v4/projects/{encoded_project_id}/merge_requests/{mr_id}"
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                url, headers=headers, ssl=GITLAB_VERIFY_SSL, timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+                if response.status == 200:
+                    mr = await response.json()
+                    result = {
+                        "id": mr["iid"],
+                        "title": mr["title"],
+                        "description": mr.get("description", ""),
+                        "state": mr["state"],
+                        "author": mr["author"]["username"],
+                        "source_branch": mr["source_branch"],
+                        "target_branch": mr["target_branch"],
+                        "web_url": mr["web_url"],
+                        "created_at": mr["created_at"],
+                        "updated_at": mr["updated_at"],
+                        "labels": mr.get("labels", []),
+                        "merge_status": mr.get("merge_status", "unknown"),
+                        "has_conflicts": mr.get("has_conflicts", False),
+                    }
+                    return json.dumps(result, ensure_ascii=False)
+                else:
+                    error_text = await response.text()
+                    return json.dumps({"error": f"GitLab API error ({response.status}): {error_text}"})
+
+    except Exception as e:
+        log.exception(f"get_gitlab_mr_details error: {e}")
+        return json.dumps({"error": str(e)})

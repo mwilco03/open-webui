@@ -987,3 +987,12 @@ PIP_PACKAGE_INDEX_OPTIONS = os.getenv("PIP_PACKAGE_INDEX_OPTIONS", "").split()
 ####################################
 
 EXTERNAL_PWA_MANIFEST_URL = os.environ.get("EXTERNAL_PWA_MANIFEST_URL")
+
+
+####################################
+# GITLAB INTEGRATION
+####################################
+
+GITLAB_URL = os.environ.get("GITLAB_URL", "https://code.levelup.cce.af.mil")
+GITLAB_TOKEN = os.environ.get("GITLAB_TOKEN", "")
+GITLAB_VERIFY_SSL = os.environ.get("GITLAB_VERIFY_SSL", "True").lower() == "true"

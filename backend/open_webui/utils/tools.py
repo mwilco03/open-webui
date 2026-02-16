@@ -79,6 +79,11 @@ from open_webui.tools.builtin import (
     query_knowledge_files,
     view_knowledge_file,
     view_skill,
+    search_gitlab_issues,
+    search_gitlab_merge_requests,
+    get_gitlab_project_info,
+    create_gitlab_issue,
+    get_gitlab_mr_details,
 )
 
 import copy
