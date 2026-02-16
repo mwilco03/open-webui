@@ -1971,13 +1971,12 @@ async def search_gitlab_issues(
     __user__: dict = None,
 ) -> str:
     """
-    Search for issues in a GitLab project.
+    Search issues in GitLab project.
 
-    :param project_id: The GitLab project ID or path (e.g., "12345" or "group/project")
-    :param state: Issue state - "opened", "closed", or "all" (default: "opened")
-    :param search: Search term to filter issues by title/description
-    :param labels: Comma-separated list of labels to filter by
-    :return: JSON list of issues with id, title, state, author, created_at, web_url
+    :param project_id: Project ID/path
+    :param state: opened/closed/all
+    :param search: Filter by title/description
+    :param labels: Comma-separated labels
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -2037,13 +2036,12 @@ async def search_gitlab_merge_requests(
     __user__: dict = None,
 ) -> str:
     """
-    Search for merge requests in a GitLab project.
+    Search merge requests in GitLab project.
 
-    :param project_id: The GitLab project ID or path (e.g., "12345" or "group/project")
-    :param state: MR state - "opened", "closed", "merged", or "all" (default: "opened")
-    :param search: Search term to filter MRs by title/description
-    :param labels: Comma-separated list of labels to filter by
-    :return: JSON list of merge requests with id, title, state, author, source_branch, target_branch, web_url
+    :param project_id: Project ID/path
+    :param state: opened/closed/merged/all
+    :param search: Filter by title/description
+    :param labels: Comma-separated labels
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -2099,10 +2097,9 @@ async def get_gitlab_project_info(
     __user__: dict = None,
 ) -> str:
     """
-    Get information about a GitLab project.
+    Get GitLab project info.
 
-    :param project_id: The GitLab project ID or path (e.g., "12345" or "group/project")
-    :return: JSON with project details including name, description, url, stars, forks, etc.
+    :param project_id: Project ID/path
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -2592,12 +2589,11 @@ async def search_gitlab_code(
     __user__: dict = None,
 ) -> str:
     """
-    Search for code in a GitLab repository.
+    Search code in GitLab repo.
 
-    :param project_id: The GitLab project ID or path
-    :param search_query: The code search query
-    :param ref: Branch or tag to search in (default: "main")
-    :return: JSON with search results showing file paths and matching lines
+    :param project_id: Project ID/path
+    :param search_query: Code to search for
+    :param ref: Branch/tag
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -2953,10 +2949,9 @@ async def search_gitlab_repos(
     __user__: dict = None,
 ) -> str:
     """
-    Search for GitLab repositories/projects across the entire GitLab instance.
+    Search GitLab repositories.
 
-    :param search_query: Search term for repository name or description
-    :return: JSON list of matching repositories with names, paths, and URLs
+    :param search_query: Search term for repo name/description
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -3006,14 +3001,13 @@ async def commit_gitlab_file(
     __user__: dict = None,
 ) -> str:
     """
-    Create or update a file in a GitLab repository and commit it.
+    Create/update file and commit.
 
-    :param project_id: The GitLab project ID or path
-    :param file_path: Path where the file should be created/updated
-    :param content: The file content
+    :param project_id: Project ID/path
+    :param file_path: File path to create/update
+    :param content: File content
     :param commit_message: Commit message
-    :param branch: Branch to commit to
-    :return: JSON with commit details
+    :param branch: Target branch
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -3096,12 +3090,11 @@ async def create_gitlab_branch(
     __user__: dict = None,
 ) -> str:
     """
-    Create a new branch in a GitLab repository.
+    Create new branch.
 
-    :param project_id: The GitLab project ID or path
-    :param branch_name: Name for the new branch
-    :param ref: Branch, tag, or commit SHA to create branch from
-    :return: JSON with created branch details
+    :param project_id: Project ID/path
+    :param branch_name: New branch name
+    :param ref: Branch/tag/commit to branch from
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -3147,11 +3140,10 @@ async def delete_gitlab_branch(
     __user__: dict = None,
 ) -> str:
     """
-    Delete a branch from a GitLab repository.
+    Delete branch.
 
-    :param project_id: The GitLab project ID or path
-    :param branch_name: Name of the branch to delete
-    :return: JSON with deletion status
+    :param project_id: Project ID/path
+    :param branch_name: Branch to delete
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -3189,11 +3181,10 @@ async def get_gitlab_job_logs(
     __user__: dict = None,
 ) -> str:
     """
-    Get the logs from a CI/CD job (for debugging pipeline failures).
+    Get CI/CD job logs.
 
-    :param project_id: The GitLab project ID or path
-    :param job_id: The job ID
-    :return: Job logs as text
+    :param project_id: Project ID/path
+    :param job_id: Job ID
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -3235,11 +3226,10 @@ async def list_gitlab_pipeline_jobs(
     __user__: dict = None,
 ) -> str:
     """
-    List all jobs in a CI/CD pipeline with their status.
+    List pipeline jobs.
 
-    :param project_id: The GitLab project ID or path
-    :param pipeline_id: The pipeline ID
-    :return: JSON list of jobs with names, status, and IDs
+    :param project_id: Project ID/path
+    :param pipeline_id: Pipeline ID
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -3287,10 +3277,9 @@ async def list_gitlab_releases(
     __user__: dict = None,
 ) -> str:
     """
-    List releases for a GitLab project.
+    List project releases.
 
-    :param project_id: The GitLab project ID or path
-    :return: JSON list of releases with tag names, dates, and descriptions
+    :param project_id: Project ID/path
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
@@ -3338,11 +3327,10 @@ async def get_gitlab_release(
     __user__: dict = None,
 ) -> str:
     """
-    Get detailed information about a specific release.
+    Get release details.
 
-    :param project_id: The GitLab project ID or path
-    :param tag_name: The release tag name
-    :return: JSON with release details including assets and links
+    :param project_id: Project ID/path
+    :param tag_name: Release tag
     """
     try:
         from open_webui.env import GITLAB_URL, GITLAB_TOKEN, GITLAB_VERIFY_SSL
